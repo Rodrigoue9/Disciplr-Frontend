@@ -247,6 +247,68 @@ describe('src/utils/motion.ts - Authorization & Validation Regression Coverage',
       expect(result).toEqual(transitionEnter);
     });
 
+    it('recovers safely when custom input contains hostile throwing getters', () => {
+      const hostileDuration = {
+        get duration(): number {
+          throw new Error('Hostile duration getter exploded');
+        },
+        ease: ease.smooth,
+      };
+      const result1 = getSafeTransition(hostileDuration);
+      expect(result1).toEqual(transitionEnter);
+
+      const hostileEase = {
+        duration: 0.25,
+        get ease(): CubicBezierCurve {
+          throw new Error('Hostile ease getter exploded');
+        },
+      };
+      const result2 = getSafeTransition(hostileEase);
+      expect(result2).toEqual(transitionEnter);
+    });
+
+    it('recovers safely when custom fallback contains hostile throwing getters', () => {
+      const hostileFallback = {
+        get duration(): number {
+          throw new Error('Fallback duration exploded');
+        },
+        get ease(): CubicBezierCurve {
+          throw new Error('Fallback ease exploded');
+        },
+      } as unknown as MotionTransition;
+
+      const result = getSafeTransition(null, hostileFallback);
+      expect(result).toEqual(transitionEnter);
+    });
+
+    it('isValidTransition returns false without throwing on hostile throwing getters or arrays', () => {
+      const hostile = {
+        get duration(): number {
+          throw new Error('Validation getter crash');
+        },
+        ease: ease.smooth,
+      };
+      expect(isValidTransition(hostile)).toBe(false);
+      expect(isValidTransition([0.3, [0, 0, 1, 1]])).toBe(false);
+    });
+
+    it('isValidCubicBezier returns false on sparse arrays without error', () => {
+      const sparse = new Array(4);
+      sparse[0] = 0;
+      sparse[3] = 1;
+      expect(isValidCubicBezier(sparse)).toBe(false);
+    });
+
+    it('recovers safely when a throwing Proxy is passed to getSafeTransition', () => {
+      const throwingProxy = new Proxy({}, {
+        get(_target, prop) {
+          throw new Error(`Access to ${String(prop)} denied by proxy`);
+        },
+      });
+      const result = getSafeTransition(throwingProxy);
+      expect(result).toEqual(transitionEnter);
+    });
+
     it('is immune to prototype pollution attempts', () => {
       const maliciousPayload = JSON.parse('{"__proto__":{"duration":0.001,"polluted":true}}');
       const safe = getSafeTransition(maliciousPayload);

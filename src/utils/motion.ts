@@ -53,12 +53,16 @@ export const transitionPage: MotionTransition = Object.freeze({
  * Rejects non-numbers, NaN, <= 0, and excessively long durations (> 10s).
  */
 export function isValidDuration(value: unknown): value is number {
-  return (
-    typeof value === 'number' &&
-    Number.isFinite(value) &&
-    value > 0 &&
-    value <= 10
-  );
+  try {
+    return (
+      typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value > 0 &&
+      value <= 10
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -68,41 +72,50 @@ export function isValidDuration(value: unknown): value is number {
  * - Output values y1 and y2 may exceed [0, 1] (e.g. bounce/overshoot) but must be finite
  */
 export function isValidCubicBezier(curve: unknown): curve is CubicBezierCurve {
-  if (!Array.isArray(curve) || curve.length !== 4) {
+  try {
+    if (!Array.isArray(curve) || curve.length !== 4) {
+      return false;
+    }
+    const [x1, y1, x2, y2] = curve;
+    return (
+      typeof x1 === 'number' &&
+      typeof y1 === 'number' &&
+      typeof x2 === 'number' &&
+      typeof y2 === 'number' &&
+      Number.isFinite(x1) &&
+      Number.isFinite(y1) &&
+      Number.isFinite(x2) &&
+      Number.isFinite(y2) &&
+      x1 >= 0 &&
+      x1 <= 1 &&
+      x2 >= 0 &&
+      x2 <= 1
+    );
+  } catch {
     return false;
   }
-  const [x1, y1, x2, y2] = curve;
-  return (
-    typeof x1 === 'number' &&
-    typeof y1 === 'number' &&
-    typeof x2 === 'number' &&
-    typeof y2 === 'number' &&
-    Number.isFinite(x1) &&
-    Number.isFinite(y1) &&
-    Number.isFinite(x2) &&
-    Number.isFinite(y2) &&
-    x1 >= 0 &&
-    x1 <= 1 &&
-    x2 >= 0 &&
-    x2 <= 1
-  );
 }
 
 /**
  * Validate that a transition object conforms to MotionTransition structure.
+ * Rejects non-objects, arrays, and objects with invalid or throwing property getters.
  */
 export function isValidTransition(transition: unknown): transition is MotionTransition {
-  if (typeof transition !== 'object' || transition === null) {
+  try {
+    if (typeof transition !== 'object' || transition === null || Array.isArray(transition)) {
+      return false;
+    }
+    const candidate = transition as Record<string, unknown>;
+    return isValidDuration(candidate.duration) && isValidCubicBezier(candidate.ease);
+  } catch {
     return false;
   }
-  const candidate = transition as Record<string, unknown>;
-  return isValidDuration(candidate.duration) && isValidCubicBezier(candidate.ease);
 }
 
 /**
  * Defensive transition resolver with fallback recovery.
- * Sanitizes input options against prototype pollution and invalid properties.
- * If properties are missing or invalid, safe defaults from the fallback transition are used.
+ * Sanitizes input options against prototype pollution, hostile getters, and invalid properties.
+ * If properties are missing, invalid, or throw during evaluation, safe defaults from the fallback transition are used.
  */
 export function getSafeTransition(
   custom?: unknown,
@@ -110,22 +123,43 @@ export function getSafeTransition(
 ): MotionTransition {
   const safeFallback = isValidTransition(fallback) ? fallback : transitionEnter;
 
-  if (typeof custom !== 'object' || custom === null) {
+  if (typeof custom !== 'object' || custom === null || Array.isArray(custom)) {
     return safeFallback;
   }
 
-  const candidate = custom as Record<string, unknown>;
+  let inputDuration: unknown;
+  let inputEase: unknown;
+  try {
+    const candidate = custom as Record<string, unknown>;
+    inputDuration = candidate.duration;
+    inputEase = candidate.ease;
+  } catch {
+    return safeFallback;
+  }
 
-  const resolvedDuration = isValidDuration(candidate.duration)
-    ? candidate.duration
+  const resolvedDuration = isValidDuration(inputDuration)
+    ? inputDuration
     : safeFallback.duration;
 
-  const resolvedEase = isValidCubicBezier(candidate.ease)
-    ? (Object.freeze([...candidate.ease]) as CubicBezierCurve)
-    : safeFallback.ease;
+  let resolvedEase: CubicBezierCurve;
+  if (isValidCubicBezier(inputEase)) {
+    try {
+      resolvedEase = Object.freeze([
+        inputEase[0],
+        inputEase[1],
+        inputEase[2],
+        inputEase[3],
+      ]) as CubicBezierCurve;
+    } catch {
+      resolvedEase = safeFallback.ease;
+    }
+  } else {
+    resolvedEase = safeFallback.ease;
+  }
 
   return Object.freeze({
     duration: resolvedDuration,
     ease: resolvedEase,
   });
 }
+
